@@ -1,0 +1,8 @@
+streamlit
+psycopg2-binary
+pandas
+python-dotenv
+bcrypt
+opencv-python
+pyzbar
+reportlab
