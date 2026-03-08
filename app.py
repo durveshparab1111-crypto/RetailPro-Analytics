@@ -300,14 +300,31 @@ def dashboard():
     # ===== TITLE =====
     st.title("📊 RetailPro Analytics Dashboard")
 
-    # ===== KPI CARDS =====
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("💰 Total Revenue", f"₹ {total_revenue:,.2f}")
     col2.metric("📈 Total Profit", f"₹ {total_profit:,.2f}")
     col3.metric("🛒 Total Orders", total_orders)
 
-    st.divider()
+    with col4:
+        st.write("")
+        st.write("")
+        if st.button("🗑️ Clear Data", key="clear_data"):
+            conn = connect()
+            cur = conn.cursor()
+            try:
+                cur.execute("DELETE FROM sales")
+                conn.commit()
+                st.success("✅ All sales data cleared successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error clearing data: {e}")
+            finally:
+                conn.close()
+
+    st.markdown("---")
+
+    # ================= CATEGORY ANALYTICS =================
 
     # ===== CHART SECTION =====
     if not df.empty:
