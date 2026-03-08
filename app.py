@@ -10,6 +10,7 @@ from reportlab.platypus import TableStyle
 import smtplib
 from email.message import EmailMessage
 
+
 # ================= CONFIG =================
 st.set_page_config(page_title="RetailPro Clothing", layout="wide")
 
@@ -90,21 +91,17 @@ h1, h2, h3 {
 
 </style>
 """, unsafe_allow_html=True)
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
 DB = {
-    "host": os.getenv("DB_HOST"),
-    "database": os.getenv("DB_NAME"),
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
+    "host": "localhost",
+    "database": "customer_analysis",
+    "user": "postgres",
+    "password": "durvesh1107",
     "port": "5432"
 }
 
-SENDER_EMAIL = os.getenv("SENDER_EMAIL")
-SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
+SENDER_EMAIL = "durveshparab200410@gmail.com"
+SENDER_PASSWORD = "zswralvmysxpnuny"
+
 def connect():
     return psycopg2.connect(**DB)
 
@@ -120,52 +117,61 @@ def auth():
 
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
 
+    # ---------------- LOGIN ----------------
     with tab1:
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+
         if st.button("Login"):
-            conn = connect()
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM users WHERE username=%s AND password=%s",(u,p))
-            if cur.fetchone():
-                st.session_state.logged_in = True
-                st.rerun()
+            if username == "" or password == "":
+                st.error("Please fill all fields")
             else:
-                st.error("Invalid Credentials")
-            conn.close()
+                conn = connect()
+                cur = conn.cursor()
 
+                cur.execute(
+                    "SELECT * FROM users WHERE username=%s AND password=%s",
+                    (username, password)
+                )
+
+                if cur.fetchone():
+                    st.session_state.logged_in = True
+                    st.success("Login Successful")
+                    st.rerun()
+                else:
+                    st.error("Invalid Credentials")
+
+                conn.close()
+
+    # ---------------- SIGNUP ----------------
     with tab2:
-        u = st.text_input("New Username")
-        p = st.text_input("New Password", type="password")
+        new_username = st.text_input("New Username")
+        new_password = st.text_input("New Password", type="password")
+
         if st.button("Create Account"):
-            conn = connect()
-            cur = conn.cursor()
-            try:
-                cur.execute("INSERT INTO users(username,password) VALUES(%s,%s)",(u,p))
-                conn.commit()
-                st.success("Account Created")
-            except:
-                conn.rollback()
-                st.error("Username Exists")
-            conn.close()
+            if new_username == "" or new_password == "":
+                st.error("Please fill all fields")
+            else:
+                conn = connect()
+                cur = conn.cursor()
 
-# ================= CAMERA =================
-def scan_barcode():
-    cap = cv2.VideoCapture(0)
-    while True:
-        ret, frame = cap.read()
-        for barcode in decode(frame):
-            code = barcode.data.decode("utf-8")
-            cap.release()
-            cv2.destroyAllWindows()
-            return code
-        cv2.imshow("Scan Barcode", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-    cap.release()
-    cv2.destroyAllWindows()
-    return None
+                # Check if username exists
+                cur.execute(
+                    "SELECT * FROM users WHERE username=%s",
+                    (new_username,)
+                )
 
+                if cur.fetchone():
+                    st.error("Username already exists")
+                else:
+                    cur.execute(
+                        "INSERT INTO users(username, password) VALUES(%s, %s)",
+                        (new_username, new_password)
+                    )
+                    conn.commit()
+                    st.success("Account Created Successfully")
+
+                conn.close()
 # ================= INVOICE =================
 def generate_invoice(product, customer, qty, gst, total, profit):
     file_name = "invoice.pdf"
@@ -218,139 +224,144 @@ def send_email(receiver, file_path):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(SENDER_EMAIL, SENDER_PASSWORD)
         smtp.send_message(msg)
+        # ================= CAMERA =================
+def scan_barcode():
+    cap = cv2.VideoCapture(0)
+
+    while True:
+        ret, frame = cap.read()
+
+        for barcode in decode(frame):
+            code = barcode.data.decode("utf-8")
+            cap.release()
+            cv2.destroyAllWindows()
+            return code
+
+        cv2.imshow("Scan Barcode", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    return None
 
 # ================= DASHBOARD =================
 # ================= DASHBOARD =================
 def dashboard():
-
-    st.markdown("""
-    <h1 style='
-    text-align:center;
-    background: linear-gradient(90deg, #00c6ff, #0072ff);
-    -webkit-background-clip: text;
-    color: transparent;
-    font-size: 42px;
-    font-weight: 800;
-    margin-bottom: 40px;
-    '>
-    📊 RetailPro Analytics Dashboard
-    </h1>
-    """, unsafe_allow_html=True)
+    
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    from datetime import datetime
 
     conn = connect()
+    cur = conn.cursor()
 
-    sales = pd.read_sql("SELECT * FROM sales", conn)
-    products = pd.read_sql("SELECT * FROM products", conn)
+    # ===== TOTAL KPIs =====
+    try:
+        cur.execute("""
+            SELECT 
+                COALESCE(SUM(selling_price),0), 
+                COALESCE(SUM(profit),0), 
+                COUNT(*)
+            FROM products
+        """)
+        result = cur.fetchone()
+
+        total_revenue = float(result[0])
+        total_profit = float(result[1])
+        total_orders = int(result[2])
+
+    except:
+        total_revenue = 0
+        total_profit = 0
+        total_orders = 0
+
+    # ===== DAILY REVENUE DATA =====
+    try:
+        cur.execute("""
+            SELECT DATE(created_at), 
+                   SUM(selling_price), 
+                   SUM(profit), 
+                   COUNT(*)
+            FROM products
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at)
+        """)
+        data = cur.fetchall()
+
+        df = pd.DataFrame(data, columns=["Date", "Revenue", "Profit", "Orders"])
+
+    except:
+        df = pd.DataFrame(columns=["Date", "Revenue", "Profit", "Orders"])
 
     conn.close()
 
-    if sales.empty:
-        st.info("No sales data available yet.")
-        return
+    # ===== TITLE =====
+    st.title("📊 RetailPro Analytics Dashboard")
 
-    # ================= CLEAN DATA =================
-
-    # Ensure numeric types
-    sales["total"] = pd.to_numeric(sales["total"], errors="coerce")
-    sales["profit"] = pd.to_numeric(sales["profit"], errors="coerce")
-
-    # Clean text columns
-    if "product_name" in sales.columns:
-        sales["product_name"] = sales["product_name"].astype(str).str.strip().str.lower()
-
-    if "name" in products.columns:
-        products["name"] = products["name"].astype(str).str.strip().str.lower()
-
-    # ================= KPI SECTION =================
-
-    revenue = sales["total"].sum()
-    profit = sales["profit"].sum()
-    total_orders = len(sales)
-
+    # ===== KPI CARDS =====
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("💰 Total Revenue", f"₹ {revenue:,.2f}")
-    col2.metric("📈 Total Profit", f"₹ {profit:,.2f}")
+    col1.metric("💰 Total Revenue", f"₹ {total_revenue:,.2f}")
+    col2.metric("📈 Total Profit", f"₹ {total_profit:,.2f}")
     col3.metric("🛒 Total Orders", total_orders)
 
-    st.markdown("---")
+    st.divider()
 
-    # ================= CATEGORY ANALYTICS =================
+    # ===== CHART SECTION =====
+    if not df.empty:
 
-    st.subheader("📦 Revenue by Category")
+        st.subheader("📅 Revenue Over Time")
 
-    if not products.empty and "category" in products.columns:
+        fig1 = plt.figure()
+        plt.plot(df["Date"], df["Revenue"])
+        plt.xticks(rotation=45)
+        plt.xlabel("Date")
+        plt.ylabel("Revenue")
+        st.pyplot(fig1)
 
-        merged = sales.merge(
-            products[["name", "category"]],
-            left_on="product_name",
-            right_on="name",
-            how="left"
-        )
+        st.subheader("📈 Profit Over Time")
 
-        merged = merged.dropna(subset=["category"])
+        fig2 = plt.figure()
+        plt.plot(df["Date"], df["Profit"])
+        plt.xticks(rotation=45)
+        plt.xlabel("Date")
+        plt.ylabel("Profit")
+        st.pyplot(fig2)
 
-        if not merged.empty:
-            category_revenue = (
-                merged.groupby("category")["total"]
-                .sum()
-                .reset_index()
-                .sort_values(by="total", ascending=False)
-            )
+        st.subheader("🛍 Orders Over Time")
 
-            st.bar_chart(category_revenue.set_index("category"))
-        else:
-            st.warning("No matching category data found.")
+        fig3 = plt.figure()
+        plt.plot(df["Date"], df["Orders"])
+        plt.xticks(rotation=45)
+        plt.xlabel("Date")
+        plt.ylabel("Orders")
+        st.pyplot(fig3)
 
     else:
-        st.warning("Products table missing category column.")
+        st.info("No sales data available yet.")
 
-    st.markdown("---")
+    st.divider()
 
-    # ================= PRODUCT ANALYTICS =================
+    # ===== CSV DOWNLOAD =====
+    summary_data = {
+        "Date Generated": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        "Total Revenue": [total_revenue],
+        "Total Profit": [total_profit],
+        "Total Orders": [total_orders]
+    }
 
-    st.subheader("👕 Product-wise Revenue")
+    summary_df = pd.DataFrame(summary_data)
 
-    product_revenue = (
-        sales.groupby("product_name")["total"]
-        .sum()
-        .reset_index()
-        .sort_values(by="total", ascending=False)
+    csv = summary_df.to_csv(index=False)
+
+    st.download_button(
+        label="📥 Download Daily Summary CSV",
+        data=csv,
+        file_name="daily_summary.csv",
+        mime="text/csv"
     )
-
-    if not product_revenue.empty:
-        st.bar_chart(product_revenue.set_index("product_name"))
-    else:
-        st.warning("No product revenue data available.")
-
-    st.markdown("---")
-
-    # ================= SALES TREND =================
-
-    if "sale_date" in sales.columns:
-        st.subheader("📅 Sales Trend")
-
-        sales["sale_date"] = pd.to_datetime(sales["sale_date"], errors="coerce")
-        sales = sales.dropna(subset=["sale_date"])
-
-        if not sales.empty:
-            daily_sales = (
-                sales.groupby(sales["sale_date"].dt.date)["total"]
-                .sum()
-            )
-
-            st.line_chart(daily_sales)
-
-    # ================= LOW STOCK ALERT =================
-
-    if not products.empty and "stock" in products.columns:
-
-        low_stock = products[products["stock"] < 5]
-
-        if not low_stock.empty:
-            st.markdown("---")
-            st.warning("⚠ Low Stock Alert (Below 5 Units)")
-            st.dataframe(low_stock[["name", "category", "stock"]])
 # ================= ADD PRODUCT =================
 def add_product():
     st.header("Add Product")
@@ -399,53 +410,36 @@ def add_product():
 # ================= BILLING =================
 # ================= BILLING =================
 def billing():
+    
+    conn = connect()
+    cur = conn.cursor()
 
-    # -------- Premium Gradient Heading --------
-    st.markdown("""
-    <h1 style='
-    text-align:center;
-    background: linear-gradient(90deg, #00c6ff, #0072ff);
-    -webkit-background-clip: text;
-    color: transparent;
-    font-size: 42px;
-    font-weight: 800;
-    margin-bottom: 40px;
-    '>
-    🧾 RetailPro Billing Dashboard
-    </h1>
-    """, unsafe_allow_html=True)
+    st.subheader("🧾 RetailPro Billing")
 
-    # -------- Barcode Input + Scan --------
-    col1, col2 = st.columns([3,1])
-
-    with col1:
-        barcode = st.text_input("Enter Barcode", value=st.session_state.scanned_barcode)
-
-    with col2:
-        st.write("")
-        st.write("")
-        if st.button("📷 Scan"):
-            scanned = scan_barcode()
-            if scanned:
-                st.session_state.scanned_barcode = scanned
-                st.rerun()
+    barcode = st.text_input("Scan / Enter Barcode")
 
     if barcode:
-        conn = connect()
-        cur = conn.cursor()
 
-        cur.execute(
-            "SELECT name, selling_price, cost_price, stock FROM products WHERE barcode=%s",
-            (barcode,)
-        )
+        # Fetch product
+        cur.execute("""
+            SELECT name, selling_price, cost_price, stock 
+            FROM products 
+            WHERE barcode = %s
+        """, (barcode,))
+        
         product = cur.fetchone()
 
         if product:
+
             name, price, cost, stock = product
+
+            st.write(f"Product: {name}")
+            st.write(f"Price: ₹{price}")
+            st.write(f"Stock Available: {stock}")
 
             qty = st.number_input("Quantity", min_value=1, max_value=stock, value=1)
 
-            # Fix Decimal issue
+            # ===== CALCULATIONS (MUST BE BEFORE BUTTON) =====
             price = float(price)
             cost = float(cost)
 
@@ -456,114 +450,154 @@ def billing():
             total = subtotal + gst
             profit = (price - cost) * qty
 
-            # -------- Beautiful Summary Box --------
-            st.markdown("""
-            <div style='
-            background-color:#1f2937;
-            padding:25px;
-            border-radius:15px;
-            box-shadow:0 0 20px rgba(0,0,0,0.5);
-            margin-top:20px;
-            '>
-            """, unsafe_allow_html=True)
+            st.write(f"Subtotal: ₹{subtotal:.2f}")
+            st.write(f"CGST (9%): ₹{cgst:.2f}")
+            st.write(f"SGST (9%): ₹{sgst:.2f}")
+            st.write(f"Total GST: ₹{gst:.2f}")
+            st.write(f"Total Amount: ₹{total:.2f}")
 
-            st.write(f"**Product:** {name}")
-            st.write(f"**Subtotal:** ₹{subtotal:.2f}")
-            st.write(f"**CGST (9%):** ₹{cgst:.2f}")
-            st.write(f"**SGST (9%):** ₹{sgst:.2f}")
-            st.write(f"**Total GST:** ₹{gst:.2f}")
-            st.write(f"**Total Amount:** ₹{total:.2f}")
-            st.write(f"**Profit:** ₹{profit:.2f}")
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown("---")
-
-            customer_name = st.text_input("Customer Name")
             customer_email = st.text_input("Customer Email")
 
-            if st.button("🚀 Confirm Sale"):
+            # ===== CONFIRM BUTTON =====
+            if st.button("🔥 Confirm Sale"):
 
-                # Save Sale
+                from datetime import datetime
+
+                # Insert into sales
                 cur.execute("""
-                    INSERT INTO sales(product_name, customer_name, quantity, gst, total, profit)
-                    VALUES (%s,%s,%s,%s,%s,%s)
-                """, (name, customer_name, qty, gst, total, profit))
+                    INSERT INTO sales 
+                    (barcode, selling_price, profit, quantity, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (barcode, total, profit, qty, datetime.now()))
 
-                # Update Stock
-                cur.execute(
-                    "UPDATE products SET stock = stock - %s WHERE barcode=%s",
-                    (qty, barcode)
-                )
+                # Update stock
+                cur.execute("""
+                    UPDATE products 
+                    SET stock = stock - %s 
+                    WHERE barcode = %s
+                """, (qty, barcode))
 
                 conn.commit()
-                conn.close()
 
+                # Create invoice text
                 invoice_text = f"""
-RetailPro Clothing
--------------------------
-Product: {name}
-Quantity: {qty}
-Subtotal: ₹{subtotal:.2f}
-CGST (9%): ₹{cgst:.2f}
-SGST (9%): ₹{sgst:.2f}
-Total GST: ₹{gst:.2f}
-Total Amount: ₹{total:.2f}
--------------------------
-Thank you for shopping!
-"""
+                RetailPro Clothing
+                ----------------------------------
+                Product: {name}
+                Quantity: {qty}
+                Subtotal: ₹{subtotal:.2f}
+                CGST (9%): ₹{cgst:.2f}
+                SGST (9%): ₹{sgst:.2f}
+                Total GST: ₹{gst:.2f}
+                ----------------------------------
+                Total Amount: ₹{total:.2f}
 
-                # -------- EMAIL --------
-                try:
-                    msg = EmailMessage()
-                    msg["Subject"] = "RetailPro Invoice"
-                    msg["From"] = SENDER_EMAIL
-                    msg["To"] = customer_email
-                    msg.set_content(invoice_text)
+                Thank you for shopping!
+                """
 
-                    server = smtplib.SMTP("smtp.gmail.com", 587)
-                    server.starttls()
-                    server.login(SENDER_EMAIL, SENDER_PASSWORD)
-                    server.send_message(msg)
-                    server.quit()
+                st.success("✅ Sale Completed Successfully!")
+                st.text(invoice_text)
 
-                    st.success("✅ Invoice Email Sent Successfully")
+                # ===== EMAIL SECTION =====
+                if customer_email:
 
-                except Exception as e:
-                    st.error(f"❌ Email Failed: {e}")
+                    from email.message import EmailMessage
+                    import smtplib
 
-                # -------- PDF DOWNLOAD --------
+                    try:
+                        msg = EmailMessage()
+                        msg["Subject"] = "RetailPro Invoice"
+                        msg["From"] = SENDER_EMAIL
+                        msg["To"] = customer_email
+                        msg.set_content(invoice_text)
+
+                        server = smtplib.SMTP("smtp.gmail.com", 587)
+                        server.starttls()
+                        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+                        server.send_message(msg)
+                        server.quit()
+
+                        st.success("📧 Invoice Email Sent Successfully!")
+
+                    except Exception as e:
+                        st.error(f"❌ Email Failed: {e}")
+
+                # ===== PDF DOWNLOAD =====
                 from io import BytesIO
                 from reportlab.platypus import SimpleDocTemplate, Paragraph
-                from reportlab.lib.styles import ParagraphStyle
+                from reportlab.lib.styles import getSampleStyleSheet
 
                 buffer = BytesIO()
                 doc = SimpleDocTemplate(buffer)
                 elements = []
-                elements.append(Paragraph(invoice_text, ParagraphStyle(name='Normal')))
+
+                styles = getSampleStyleSheet()
+                elements.append(Paragraph(invoice_text.replace("\n", "<br/>"), styles["Normal"]))
                 doc.build(elements)
 
                 st.download_button(
-                    label="📥 Download Invoice",
+                    label="📄 Download Invoice PDF",
                     data=buffer.getvalue(),
                     file_name="invoice.pdf",
                     mime="application/pdf"
                 )
 
         else:
-            st.error("Product not found.")
-# ================= MAIN =================
+            st.error("❌ Product not found.")
+
+    conn.close()
+# =========================================
+# 🔥 PASTE LOGIN CHECK HERE (BOTTOM)
+# =========================================
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+
 if not st.session_state.logged_in:
     auth()
 else:
-    menu = st.sidebar.radio("Navigation", ["Dashboard","Add Product","Billing","Logout"])
+
+    menu = st.sidebar.radio(
+        "Navigation",
+        ["Dashboard", "Add Product", "Billing", "Data Management", "Logout"]
+    )
 
     if menu == "Dashboard":
         dashboard()
+
     elif menu == "Add Product":
         add_product()
+
     elif menu == "Billing":
         billing()
+
+    elif menu == "Data Management":
+
+        st.markdown("## ⚙ Data Management Panel")
+        st.warning("⚠ This will delete ALL product data permanently!")
+
+        if st.button("🗑 Clear All Data"):
+
+            conn = connect()
+            cur = conn.cursor()
+
+            try:
+                cur.execute("DELETE FROM products")
+                conn.commit()
+
+                for key in list(st.session_state.keys()):
+                    if key != "logged_in":
+                        del st.session_state[key]
+
+                st.success("✅ All Data Cleared Successfully!")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+            conn.close()
+
     elif menu == "Logout":
         st.session_state.logged_in = False
         st.rerun()

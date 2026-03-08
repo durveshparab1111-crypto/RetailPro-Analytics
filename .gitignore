@@ -1,0 +1,7 @@
+.env
+_pycache_/
+*.pyc
+*.db
+venv/
+.env/
+retailenv/
