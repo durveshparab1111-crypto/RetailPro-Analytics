@@ -267,11 +267,27 @@ def dashboard():
     profit = sales["profit"].sum()
     total_orders = len(sales)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("💰 Total Revenue", f"₹ {revenue:,.2f}")
     col2.metric("📈 Total Profit", f"₹ {profit:,.2f}")
     col3.metric("🛒 Total Orders", total_orders)
+
+    with col4:
+        st.write("")
+        st.write("")
+        if st.button("🗑️ Clear Data", key="clear_data"):
+            conn = connect()
+            cur = conn.cursor()
+            try:
+                cur.execute("DELETE FROM sales")
+                conn.commit()
+                st.success("✅ All sales data cleared successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error clearing data: {e}")
+            finally:
+                conn.close()
 
     st.markdown("---")
 
