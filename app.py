@@ -179,6 +179,8 @@ def generate_invoice(product, customer, qty, gst, total, profit):
     elements = []
     styles = getSampleStyleSheet()
 
+    
+
     elements.append(Paragraph("RetailPro Clothing Invoice", styles["Title"]))
     elements.append(Spacer(1, 20))
 
